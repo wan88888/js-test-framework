@@ -1,0 +1,30 @@
+{
+  "name": "js-test-framework",
+  "version": "1.0.0",
+  "description": "A JavaScript testing framework with Web UI testing, API testing, headless browser automation and test reporting",
+  "main": "runner.js",
+  "scripts": {
+    "test": "node runner.js",
+    "test:ui": "node runner.js --type=ui",
+    "test:api": "node runner.js --type=api",
+    "test:report": "node runner.js --report"
+  },
+  "keywords": [
+    "testing",
+    "puppeteer",
+    "api-testing",
+    "ui-testing",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer": "^22.15.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
