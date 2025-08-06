@@ -4,12 +4,14 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const Reporter = require('./reporter.js');
+const { TestUtils, ParallelExecutor } = require('./utils/TestUtils.js');
 
 class TestRunner {
   constructor() {
     this.tests = [];
     this.results = [];
     this.reporter = new Reporter();
+    this.testUtils = new TestUtils();
     this.config = {
       testDir: './tests',
       timeout: 30000,
@@ -81,8 +83,32 @@ class TestRunner {
     
     const startTime = Date.now();
     
-    for (const test of this.tests) {
-      await this.runSingleTest(test);
+    try {
+      // 执行钩子函数
+      if (this.config.hooks?.beforeAll) {
+        await this.config.hooks.beforeAll();
+      }
+      
+      // 根据配置选择执行方式
+      if (this.config.parallel?.enabled && this.tests.length > 1) {
+        console.log(`📊 并行执行模式 (最大并发: ${this.config.parallel.maxWorkers || 4})`);
+        const executor = new ParallelExecutor(this.config.parallel.maxWorkers || 4);
+        this.results = await executor.executeTests(this.tests);
+      } else {
+        console.log('📝 串行执行模式');
+        for (const test of this.tests) {
+          await this.runSingleTest(test);
+        }
+      }
+      
+      // 执行钩子函数
+      if (this.config.hooks?.afterAll) {
+        await this.config.hooks.afterAll();
+      }
+      
+    } finally {
+      // 清理资源
+      await this.testUtils.cleanup();
     }
     
     const endTime = Date.now();
@@ -99,8 +125,8 @@ class TestRunner {
     process.exit(failed > 0 ? 1 : 0);
   }
 
-  // 运行单个测试
-  async runSingleTest(test) {
+  // 运行单个测试（支持重试机制）
+  async runSingleTest(test, retryCount = 0) {
     console.log(`📝 运行测试: ${test.name} (${test.type})`);
     
     const result = {
@@ -110,35 +136,89 @@ class TestRunner {
       status: 'pending',
       duration: 0,
       error: null,
-      details: null
+      details: null,
+      retryCount: 0
     };
     
     const startTime = Date.now();
+    const maxRetries = this.config.retry?.maxRetries || 2;
     
     try {
+      // 执行beforeEach钩子
+      if (this.config.hooks?.beforeEach) {
+        await this.config.hooks.beforeEach(test);
+      }
+      
       // 动态加载并运行测试
       delete require.cache[require.resolve(test.file)];
       const testModule = require(test.file);
       
       if (typeof testModule === 'function') {
-        await testModule();
+        // 为测试函数注入工具
+        await testModule(this.testUtils);
       } else if (testModule.default && typeof testModule.default === 'function') {
-        await testModule.default();
+        await testModule.default(this.testUtils);
       } else {
         throw new Error('测试文件必须导出一个函数');
       }
       
       result.status = 'passed';
-      console.log(`✅ ${test.name} - 通过`);
+      result.retryCount = retryCount;
+      console.log(`✅ ${test.name} - 通过${retryCount > 0 ? ` (重试${retryCount}次)` : ''}`);
+      
+      // 执行afterEach钩子
+      if (this.config.hooks?.afterEach) {
+        await this.config.hooks.afterEach({ ...test, status: 'passed' });
+      }
+      
     } catch (error) {
+      // 重试逻辑
+      if (retryCount < maxRetries && this.shouldRetry(error)) {
+        console.log(`🔄 重试测试 ${test.name} (${retryCount + 1}/${maxRetries})`);
+        const retryDelay = this.config.retry?.retryDelay || 1000;
+        await this.delay(retryDelay * (retryCount + 1));
+        return this.runSingleTest(test, retryCount + 1);
+      }
+      
       result.status = 'failed';
       result.error = error.message;
       result.details = error.stack;
-      console.log(`❌ ${test.name} - 失败: ${error.message}`);
+      result.retryCount = retryCount;
+      console.log(`❌ ${test.name} - 失败: ${error.message}${retryCount > 0 ? ` (重试${retryCount}次后)` : ''}`);
+      
+      // 执行afterEach钩子
+      if (this.config.hooks?.afterEach) {
+        await this.config.hooks.afterEach({ ...test, status: 'failed', error: error.message });
+      }
     }
     
     result.duration = Date.now() - startTime;
     this.results.push(result);
+    return result;
+  }
+  
+  // 判断是否应该重试
+  shouldRetry(error) {
+    if (!this.config.retry?.enabled) return false;
+    
+    const retryableErrors = [
+      'timeout',
+      'network',
+      'ECONNRESET',
+      'ENOTFOUND',
+      'Node is either not clickable',
+      'Navigation timeout',
+      'Protocol error'
+    ];
+    
+    return retryableErrors.some(pattern => 
+      error.message.toLowerCase().includes(pattern.toLowerCase())
+    );
+  }
+  
+  // 延迟函数
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   // 打印测试摘要

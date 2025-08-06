@@ -53,7 +53,7 @@ module.exports = {
   
   // 并发配置
   parallel: {
-    enabled: false,
+    enabled: true,
     maxWorkers: 4
   },
   

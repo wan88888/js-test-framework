@@ -1,13 +1,15 @@
 const puppeteer = require('puppeteer');
+const Assert = require('../../utils/Assert.js');
 
 /**
  * UI测试示例 - SauceDemo网站登录测试
  * 测试目标: 验证用户登录流程和页面交互功能
  */
-module.exports = async function() {
+module.exports = async function(testUtils) {
   console.log('🌐 开始UI测试: SauceDemo网站登录流程');
   
-  const browser = await puppeteer.launch({ 
+  // 使用资源池获取浏览器实例
+  const browser = testUtils ? await testUtils.getBrowser() : await puppeteer.launch({ 
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
@@ -23,20 +25,14 @@ module.exports = async function() {
     await page.goto('https://www.saucedemo.com', { waitUntil: 'networkidle2' });
     
     const title = await page.title();
-    if (!title.includes('Swag Labs')) {
-      throw new Error(`页面标题验证失败，期望包含'Swag Labs'，实际: ${title}`);
-    }
+    Assert.contains(title, 'Swag Labs', '页面标题验证失败');
     console.log('✓ 页面加载成功，标题验证通过');
     
     // 测试2: 验证登录表单元素存在
     console.log('🔍 验证登录表单元素...');
-    const usernameInput = await page.$('#user-name');
-    const passwordInput = await page.$('#password');
-    const loginButton = await page.$('#login-button');
-    
-    if (!usernameInput || !passwordInput || !loginButton) {
-      throw new Error('登录表单元素缺失');
-    }
+    await Assert.elementExists(page, '#user-name', '用户名输入框不存在');
+    await Assert.elementExists(page, '#password', '密码输入框不存在');
+    await Assert.elementExists(page, '#login-button', '登录按钮不存在');
     console.log('✓ 登录表单元素验证通过');
     
     // 测试3: 执行登录操作
@@ -62,9 +58,7 @@ module.exports = async function() {
     
     // 验证URL变化
     const currentUrl = page.url();
-    if (!currentUrl.includes('inventory.html')) {
-      throw new Error(`登录后URL验证失败，期望包含'inventory.html'，实际: ${currentUrl}`);
-    }
+    Assert.contains(currentUrl, 'inventory.html', '登录后URL验证失败');
     console.log('✓ 登录成功，页面跳转正确');
     
     // 测试5: 验证产品页面元素
@@ -72,16 +66,11 @@ module.exports = async function() {
     
     // 检查产品列表
     const productItems = await page.$$('.inventory_item');
-    if (productItems.length === 0) {
-      throw new Error('产品列表为空');
-    }
+    Assert.greaterThan(productItems.length, 0, '产品列表为空');
     console.log(`✓ 找到 ${productItems.length} 个产品`);
     
     // 检查购物车图标
-    const cartIcon = await page.$('.shopping_cart_link');
-    if (!cartIcon) {
-      throw new Error('购物车图标未找到');
-    }
+    await Assert.elementExists(page, '.shopping_cart_link', '购物车图标未找到');
     console.log('✓ 购物车图标验证通过');
     
     // 测试6: 添加商品到购物车
@@ -95,10 +84,7 @@ module.exports = async function() {
       
       // 验证购物车数量显示
       await page.waitForSelector('.shopping_cart_badge', { timeout: 5000 });
-      const cartBadge = await page.$eval('.shopping_cart_badge', el => el.textContent);
-      if (cartBadge !== '1') {
-        throw new Error(`购物车数量显示错误，期望'1'，实际'${cartBadge}'`);
-      }
+      await Assert.elementText(page, '.shopping_cart_badge', '1', '购物车数量显示错误');
       console.log('✓ 购物车数量显示正确');
     }
     
@@ -113,10 +99,7 @@ module.exports = async function() {
       console.log('✓ 菜单打开成功');
       
       // 验证登出链接存在
-      const logoutLink = await page.$('#logout_sidebar_link');
-      if (!logoutLink) {
-        throw new Error('登出链接未找到');
-      }
+      await Assert.elementExists(page, '#logout_sidebar_link', '登出链接未找到');
       console.log('✓ 登出链接验证通过');
       
       // 菜单功能测试完成，无需关闭
@@ -146,6 +129,11 @@ module.exports = async function() {
     
     throw error;
   } finally {
-    await browser.close();
+    // 使用资源池归还浏览器实例
+    if (testUtils) {
+      await testUtils.returnBrowser(browser);
+    } else {
+      await browser.close();
+    }
   }
 };
