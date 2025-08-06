@@ -14,8 +14,32 @@ class Reporter {
     }
   }
 
+  // 清理旧的测试报告
+  cleanOldReports() {
+    try {
+      const files = fs.readdirSync(this.reportDir);
+      const reportFiles = files.filter(file => 
+        file.startsWith('test-report-') && (file.endsWith('.json') || file.endsWith('.html'))
+      );
+      
+      reportFiles.forEach(file => {
+        const filePath = path.join(this.reportDir, file);
+        fs.unlinkSync(filePath);
+      });
+      
+      if (reportFiles.length > 0) {
+        console.log(`🧹 已清理 ${reportFiles.length} 个旧测试报告`);
+      }
+    } catch (error) {
+      console.warn('清理旧报告时出错:', error.message);
+    }
+  }
+
   // 生成测试报告
   async generateReport(results, duration) {
+    // 清理旧报告
+    this.cleanOldReports();
+    
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     
     // 生成JSON报告
